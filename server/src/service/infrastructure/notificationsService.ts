@@ -14,6 +14,7 @@ export interface INotificationsService {
 	updateById(id: string, teamId: string, updateData: Partial<Notification>): Promise<Notification>;
 	deleteById: (id: string, teamId: string) => Promise<Notification>;
 	handleNotifications: (monitor: Monitor, monitorStatusResponse: MonitorStatusResponse, decision: MonitorActionDecision) => Promise<boolean>;
+	sendEscalationNotifications: (monitor: Monitor, monitorStatusResponse: MonitorStatusResponse, decision: MonitorActionDecision) => Promise<boolean>;
 
 	sendTestNotification: (notification: Partial<Notification>) => Promise<boolean>;
 	testAllNotifications: (notificationIds: string[]) => Promise<boolean>;
@@ -132,6 +133,47 @@ export class NotificationsService implements INotificationsService {
 		return succeeded === notifications.length;
 	};
 
+	private sendEscalationNotificationsInternal = async (monitor: Monitor, monitorStatusResponse: MonitorStatusResponse, decision: MonitorActionDecision) => {
+		const notificationIds = monitor.escalatedNotifications ?? [];
+		if (notificationIds.length === 0) {
+			this.logger.warn({
+				message: `Escalation notifications skipped: no escalation channels configured for monitor ${monitor.id}`,
+				service: SERVICE_NAME,
+				method: "sendEscalationNotificationsInternal",
+			});
+			return false;
+		}
+
+		const notifications = await this.notificationsRepository.findNotificationsByIds(notificationIds);
+		if (notifications.length === 0) {
+			this.logger.warn({
+				message: `Escalation notifications skipped: configured channels not found for monitor ${monitor.id}`,
+				service: SERVICE_NAME,
+				method: "sendEscalationNotificationsInternal",
+			});
+			return false;
+		}
+		const settings = this.settingsService.getSettings();
+		const clientHost = settings.clientHost || "Host not defined";
+		const baseMessage = this.notificationMessageBuilder.buildMessage(monitor, monitorStatusResponse, decision, clientHost);
+		const notificationMessage: NotificationMessage = {
+			...baseMessage,
+			content: {
+				...baseMessage.content,
+				title: `Escalation: Monitor ${monitor.name} still down`,
+				summary: `Escalation: ${monitor.name} still down. ${baseMessage.content.summary}`,
+			},
+			metadata: {
+				...baseMessage.metadata,
+				isEscalation: true,
+			},
+		};
+		const tasks = notifications.map((notification) => this.send(notification, monitor, monitorStatusResponse, decision, notificationMessage));
+		const outcomes = await Promise.all(tasks);
+		const succeeded = outcomes.filter(Boolean).length;
+		return succeeded === notifications.length;
+	};
+
 	handleNotifications = async (monitor: Monitor, monitorStatusResponse: MonitorStatusResponse, decision: MonitorActionDecision) => {
 		if (!decision.shouldSendNotification) {
 			return false;
@@ -139,6 +181,10 @@ export class NotificationsService implements INotificationsService {
 
 		// Send notifications based on decision
 		return await this.sendNotifications(monitor, monitorStatusResponse, decision);
+	};
+
+	sendEscalationNotifications = async (monitor: Monitor, monitorStatusResponse: MonitorStatusResponse, decision: MonitorActionDecision) => {
+		return await this.sendEscalationNotificationsInternal(monitor, monitorStatusResponse, decision);
 	};
 
 	sendTestNotification = async (notification: Partial<Notification>) => {

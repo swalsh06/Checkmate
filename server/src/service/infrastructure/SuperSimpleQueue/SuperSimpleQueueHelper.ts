@@ -177,6 +177,35 @@ export class SuperSimpleQueueHelper implements ISuperSimpleQueueHelper {
 						stack: error instanceof Error ? error.stack : undefined,
 					});
 				});
+
+				// Step 8. Handle escalation notifications for long-running incidents
+				const activeIncident = await this.incidentsRepository.findActiveByMonitorId(monitorId, teamId).catch(() => null);
+				const escalationAfterMinutes = statusChangeResult.monitor.escalationAfterMinutes ?? monitor.escalationAfterMinutes;
+				if (statusChangeResult.monitor.status === "down" && activeIncident && escalationAfterMinutes) {
+					const lastEscalationReference = activeIncident.escalationNotifiedAt ?? activeIncident.startTime;
+					const minutesSinceLastEscalation = (Date.now() - new Date(lastEscalationReference).getTime()) / (1000 * 60);
+					if (minutesSinceLastEscalation >= escalationAfterMinutes) {
+						const escalationMonitor = {
+							...statusChangeResult.monitor,
+							escalatedNotifications: statusChangeResult.monitor.escalatedNotifications ?? monitor.escalatedNotifications,
+							escalationAfterMinutes,
+						};
+						const escalationSent = await this.notificationsService.sendEscalationNotifications(escalationMonitor, status, decision).catch((error: unknown) => {
+							this.logger.warn({
+								message: `Error sending escalation notifications for job ${monitor.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+								service: SERVICE_NAME,
+								method: "getMonitorJob",
+								stack: error instanceof Error ? error.stack : undefined,
+							});
+							return false;
+						});
+						if (escalationSent) {
+							await this.incidentsRepository.updateById(activeIncident.id, activeIncident.teamId, {
+								escalationNotifiedAt: new Date().toISOString(),
+							});
+						}
+					}
+				}
 			} catch (error: unknown) {
 				this.logger.warn({
 					message: error instanceof Error ? error.message : "Unknown error",

@@ -22,7 +22,7 @@
 					align="left"
 					font-size="10px"
 				>
-					Message from Checkmate Service
+					Message from Checkmate Service{{#if serviceMessageSuffix}} {{serviceMessageSuffix}}{{/if}}
 				</mj-text>
 			</mj-column>
 			<mj-column
