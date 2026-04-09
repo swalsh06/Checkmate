@@ -78,6 +78,10 @@ export class EmailProvider implements INotificationProvider {
 	}
 
 	private buildSubject(message: NotificationMessage): string {
+		if (message.metadata.isEscalation) {
+			return `Escalation: Monitor ${message.monitor.name} still down`;
+		}
+
 		switch (message.type) {
 			case "monitor_down":
 				return `Monitor ${message.monitor.name} is down`;
@@ -96,6 +100,9 @@ export class EmailProvider implements INotificationProvider {
 		const context = {
 			title: message.content.title,
 			summary: message.content.summary,
+			serviceMessageSuffix: message.metadata.isEscalation
+				? `Escalation: ${message.monitor.name} still down`
+				: undefined,
 			monitorName: message.monitor.name,
 			monitorUrl: message.monitor.url,
 			monitorType: message.monitor.type,

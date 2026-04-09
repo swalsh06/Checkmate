@@ -1,4 +1,5 @@
-#!/bin/bash
+docker rm -f uptime_database_mongo
+docker run -d -p 27017:27017 -v uptime_mongo_data:/data/db --name uptime_database_mongo mongo:6.0#!/bin/bash
 
 # Change directory to root Server directory for correct Docker Context
 cd "$(dirname "$0")"
